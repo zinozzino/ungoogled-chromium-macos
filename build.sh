@@ -21,18 +21,33 @@ mkdir -p "$_download_cache"
 "$_main_repo/utils/prune_binaries.py" "$_src_dir" "$_main_repo/pruning.list"
 "$_main_repo/utils/patches.py" apply "$_src_dir" "$_main_repo/patches" "$_root_dir/patches"
 "$_main_repo/utils/domain_substitution.py" apply -r "$_main_repo/domain_regex.list" -f "$_main_repo/domain_substitution.list" -c "$_root_dir/build/domsubcache.tar.gz" "$_src_dir"
-cp "$_main_repo/flags.gn" "$_src_dir/out/Default/args.gn"
-cat "$_root_dir/flags.macos.gn" >> "$_src_dir/out/Default/args.gn"
 
 cd "$_src_dir"
 
-./tools/gn/bootstrap/bootstrap.py -o out/Default/gn --skip-generate-buildfiles
-./out/Default/gn gen out/Default --fail-on-unused-args
-ninja -C out/Default chrome chromedriver
+for arch in ("arm64", "x86_64"); do
+  cp "$_main_repo/flags.gn" "$_src_dir/out/release_$arch/args.gn"
+  cat "$_root_dir/flags.macos.gn" >> "$_src_dir/out/release_$arch/args.gn"
+
+  if [ $arch = "arm64" ]; then
+    echo "target_cpu=\"arm64\"" >> "$_src_dir/out/release_$arch"
+  fi
+
+  rm -rf out/Release
+
+  ./tools/gn/bootstrap/bootstrap.py -o "out/release_$arch/gn" --skip-generate-buildfiles
+  "./out/release_$arch/gn" gen "out/release_$arch" --fail-on-unused-args
+  ninja -C "out/release_$arch" chrome chromedriver
+done
+
+mkdir -p out/release_universal
+chrome/installer/mac/universalizer.py \
+  ./out/release_x86_64/Chromium.app \
+  ./out/release_arm64/Chromium.app \
+  ./out/release_universal/Chromium.app
 
 chrome/installer/mac/pkg-dmg \
-  --sourcefile --source out/Default/Chromium.app \
-  --target "$_root_dir/build/ungoogled-chromium_${_chromium_version}-${_ungoogled_revision}.${_package_revision}_macos.dmg" \
+  --sourcefile --source out/release_universal/Chromium.app \
+  --target "$_root_dir/build/ungoogled-chromium_${_chromium_version}-${_ungoogled_revision}.${_package_revision}_macos_universal.dmg" \
   --volname Chromium --symlink /Applications:/Applications \
   --format UDBZ --verbosity 2
 
